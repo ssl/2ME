@@ -1,0 +1,5 @@
+dnspython
+python-whois
+request
+prettytable
+python-dotenv

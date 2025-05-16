@@ -9,9 +9,14 @@ import concurrent.futures
 import threading
 from functools import partial
 from prettytable import PrettyTable
+from dotenv import load_dotenv
 
-# Set your Domainr API Key here
-DOMAINR_API_KEY = '505dbb9ed4msh32e227bfe439811p11e749jsnf23a3afe508d'
+# Load environment variables from .env file
+load_dotenv()
+
+# Get settings from environment variables
+DOMAINR_API_KEY = os.getenv('DOMAINR_API_KEY', 'none')
+MAX_TLD_LENGTH = int(os.getenv('MAX_TLD_LENGTH', '50'))
 
 # Function to color text using ANSI codes
 def color_text(text, color):
@@ -684,7 +689,7 @@ def main():
             print(f"File '{all_tlds_file}' not found.")
             sys.exit(1)
         with open(all_tlds_file, 'r') as f:
-            tlds = [line.strip().lstrip('.').lower() for line in f if len(line.strip())<=2]
+            tlds = [line.strip().lstrip('.').lower() for line in f if len(line.strip())<=MAX_TLD_LENGTH]
         # Generate domains by appending base_domain with each TLD
         domains = [f"{base_domain}.{tld}" for tld in tlds]
     else:
@@ -806,5 +811,10 @@ if __name__ == "__main__":
         from prettytable import PrettyTable
     except ImportError:
         print("The 'PrettyTable' module is required. Install it by running 'pip install prettytable'")
+        sys.exit(1)
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        print("The 'python-dotenv' module is required. Install it by running 'pip install python-dotenv'")
         sys.exit(1)
     main()
