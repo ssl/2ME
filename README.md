@@ -2,6 +2,8 @@
 
 2ME is a powerful domain availability checker that uses multiple methods to verify domain availability and pricing. It provides detailed information about domain status, including availability, pricing, and any restrictions. 2ME is able to get availabilty status for *all* TLDs.
 
+![2ME Demo](https://imgur.com/TdcmX2P.gif)
+
 ## Setup
 
 1. Install the required dependencies:
