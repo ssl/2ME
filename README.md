@@ -55,3 +55,12 @@ The tool uses multiple methods (in this order) to check domain availability fast
 - Namecheap API
 - Gandi API
 - Domainr API
+
+All methods are free to use, and only Domainr requires an actual API key. A free Domainr key gives 10K queries/month. Since all other methods are free and unlimited, 2ME will try to get all data with the other methods first. Domainr is only there to validate the last unique TLDs (if requested).
+
+Example when checking a single domain for *all* TLDS;
+- 1446 total queries
+- 1011 validated by TLD validation/DNS records/WHOIS lookup.
+- 262 validated by NCAPI
+- 148 validated by Gandi API
+- only 23 validated by Domainr (1.59%)
