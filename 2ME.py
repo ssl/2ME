@@ -7,6 +7,8 @@ import logging
 import requests
 import concurrent.futures
 import threading
+import argparse
+import itertools
 from functools import partial
 from prettytable import PrettyTable
 from dotenv import load_dotenv
@@ -14,9 +16,16 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Get settings from environment variables
+# Get settings from environment variables with defaults
 DOMAINR_API_KEY = os.getenv('DOMAINR_API_KEY', 'none')
 MAX_TLD_LENGTH = int(os.getenv('MAX_TLD_LENGTH', '50'))
+THREADS = int(os.getenv('THREADS', '25'))
+MAX_GENERATE = int(os.getenv('MAX_GENERATE', '1000000'))
+OUTPUT_FILE = os.getenv('OUTPUT_FILE', 'output.txt')
+DEFAULT_CHARSET = os.getenv('DEFAULT_CHARSET', 'a-z')
+
+# Version
+VERSION = "2.2"
 
 # Function to color text using ANSI codes
 def color_text(text, color):
@@ -236,7 +245,7 @@ class TLDCheck(Method):
 
         # Check domain length
         sld_length = len(sld)
-        min_length = tld_info.get('min_length', 'Unknown')
+        min_length = 1#tld_info.get('min_length', 'Unknown')
         max_length = tld_info.get('max_length', 'Unknown')
         try:
             min_length = int(min_length)
@@ -271,6 +280,8 @@ class DNSCheck(Method):
             for record_type in record_types:
                 answers = dns.resolver.resolve(domain, record_type)
                 if answers:
+                    if domain.endswith('.ws') and record_type == 'A' and answers[0].address == '64.70.19.203':
+                        return False
                     # If any record is found, the domain is registered
                     domain_status.set_availability(False, method_name=method_name, custom_reason=f'{record_type} records found (domain is registered)')
                     return True  # Availability determined
@@ -491,7 +502,11 @@ class GandiAPICheck(Method):
                             data = json.loads(data_content)
                             fqdn = data.get('fqdn')
                             availability = data.get('availability')
-                            domain_availability[fqdn] = availability
+                            premium = data.get('premium', 0)
+                            if premium == 1:
+                                domain_availability[fqdn] = 'premium'
+                            else:
+                                domain_availability[fqdn] = availability
 
                         elif line.startswith('event: billing'):
                             # Next line should be data
@@ -509,7 +524,7 @@ class GandiAPICheck(Method):
                                 for product in products:
                                     if product.get('process') == 'create':
                                         price_info = product.get('prices', [])[0]
-                                        average_price = price_info.get('average_price')  # Changed from 'price_before_taxes' to 'average_price'
+                                        average_price = price_info.get('average_price')
                                         if average_price:
                                             domain_prices[fqdn] = average_price
                                         break
@@ -529,6 +544,9 @@ class GandiAPICheck(Method):
                             ds.set_availability(False, method_name=method_name)
                         elif availability == 'invalid':
                             ds.set_availability(False, method_name=method_name)
+                        elif availability == 'premium':
+                            average_price = domain_prices.get(ds.domain, 'Unknown')
+                            ds.set_availability('Premium', price=average_price, method_name=method_name)
                         else:
                             # Append reason if API cannot determine status
                             ds.add_reason('Inconclusive', method_name=method_name)
@@ -545,8 +563,8 @@ class GandiAPICheck(Method):
 class DomainrAPICheck(Method):
     is_batch_method = True
 
-    def __init__(self):
-        pass
+    def __init__(self, domainr_api_key):
+        self.domainr_api_key = domainr_api_key
 
     def run(self, domain_statuses):
         global error_messages
@@ -574,7 +592,7 @@ class DomainrAPICheck(Method):
             try:
                 params = {'domain': domain}
                 response = requests.get('https://domainr.p.rapidapi.com/v2/status', headers={
-                    'X-RapidAPI-Key': DOMAINR_API_KEY,
+                    'X-RapidAPI-Key': self.domainr_api_key,
                     'X-RapidAPI-Host': 'domainr.p.rapidapi.com'
                 }, params=params, timeout=10)
                 if response.status_code == 200:
@@ -674,38 +692,292 @@ def get_sort_key(ds):
 
     return (availability_priority, price)
 
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description=f'2ME {VERSION} - Advanced domain checker for all TLDs',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Check domains from file
+  python 2ME.py -f domains.txt
+
+  # Check specific domains with specific TLDs
+  python 2ME.py -d "example,test" --tlds ".com,.net,.org"
+
+  # Generate 3-character domains with all TLDs
+  python 2ME.py --generate 3 --charset a-z
+
+  # Generate 4-character domains with specific TLDs, only DNS method
+  python 2ME.py --generate 4 --charset a-z0-9 --tlds ".com,.net" --methods dns
+
+  # Check single domain with all methods except WHOIS
+  python 2ME.py example.com --exclude-methods whois
+
+  # Only show available domains
+  python 2ME.py -f domains.txt --show-status available
+
+  # Hide unavailable and premium domains
+  python 2ME.py -f domains.txt --hide-status unavailable,premium
+
+  # Use custom API key
+  python 2ME.py example.com --domainr-api-key YOUR_API_KEY
+        """
+    )
+    
+    # Input options
+    input_group = parser.add_mutually_exclusive_group()
+    input_group.add_argument('domain', nargs='?', help='Single domain to check')
+    input_group.add_argument('-f', '--file', help='File containing domains to check')
+    input_group.add_argument('-d', '--domains', help='Comma-separated list of domains')
+    input_group.add_argument('--generate', type=int, help='Generate domains of specified length')
+    
+    # TLD options
+    parser.add_argument('--tlds', help='TLDs to use: file path, comma-separated list, or "*" for all')
+    parser.add_argument('--tlds-file', help='File containing TLDs (one per line)')
+    
+    # Generation options
+    parser.add_argument('--charset', choices=['a-z', 'a-z0-9', '0-9'], default=DEFAULT_CHARSET,
+                       help=f'Character set for domain generation (default: {DEFAULT_CHARSET})')
+    parser.add_argument('--max-generate', type=int, default=MAX_GENERATE,
+                       help=f'Maximum number of domains to generate (default: {MAX_GENERATE})')
+    
+    # Method selection
+    parser.add_argument('--methods', help='Comma-separated list of methods to use: tld,dns,whois,ncapi,gandi,domainr')
+    parser.add_argument('--exclude-methods', help='Comma-separated list of methods to exclude')
+    
+    # Status filtering
+    parser.add_argument('--show-status', help='Only show domains with these statuses: available,unavailable,premium,unknown')
+    parser.add_argument('--hide-status', help='Hide domains with these statuses: available,unavailable,premium,unknown')
+    
+    # Output options
+    parser.add_argument('-o', '--output', default=OUTPUT_FILE, help=f'Output file (default: {OUTPUT_FILE})')
+    parser.add_argument('--threads', type=int, default=THREADS, help=f'Number of threads (default: {THREADS})')
+    
+    # API configuration
+    parser.add_argument('--domainr-api-key', default=DOMAINR_API_KEY, 
+                       help=f'Domainr API key (default: from environment or "none")')
+    
+    # Other options
+    parser.add_argument('--max-tld-length', type=int, default=MAX_TLD_LENGTH,
+                       help=f'Maximum TLD length (default: {MAX_TLD_LENGTH})')
+    parser.add_argument('--version', action='version', version=f'2ME {VERSION}')
+    
+    return parser.parse_args()
+
+def load_domains_from_file(file_path):
+    """Load domains from a file."""
+    if not os.path.isfile(file_path):
+        print(f"File '{file_path}' not found.")
+        sys.exit(1)
+    with open(file_path, 'r') as f:
+        domains = [line.strip() for line in f if line.strip()]
+    return domains
+
+def load_tlds_from_file(file_path):
+    """Load TLDs from a file."""
+    if not os.path.isfile(file_path):
+        print(f"File '{file_path}' not found.")
+        sys.exit(1)
+    with open(file_path, 'r') as f:
+        tlds = [line.strip().lstrip('.').lower() for line in f if line.strip()]
+    return tlds
+
+def parse_tlds(tlds_arg, max_tld_length):
+    """Parse TLDs from argument."""
+    if not tlds_arg or tlds_arg == '*':
+        # Load all TLDs
+        all_tlds_file = 'all-tlds.txt'
+        if not os.path.isfile(all_tlds_file):
+            print(f"File '{all_tlds_file}' not found for loading all TLDs.")
+            sys.exit(1)
+        return load_tlds_from_file(all_tlds_file)
+    elif os.path.isfile(tlds_arg):
+        # Load from file
+        return load_tlds_from_file(tlds_arg)
+    else:
+        # Parse comma-separated list
+        tlds = [tld.strip().lstrip('.').lower() for tld in tlds_arg.split(',') if tld.strip()]
+        return [tld for tld in tlds if len(tld) <= max_tld_length]
+
+def generate_domains(length, charset, max_generate):
+    """Generate domains of specified length using given character set."""
+    if charset == 'a-z':
+        chars = 'abcdefghijklmnopqrstuvwxyz'
+    elif charset == 'a-z0-9':
+        chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+    elif charset == '0-9':
+        chars = '0123456789'
+    else:
+        raise ValueError(f"Unknown charset: {charset}")
+    
+    domains = []
+    count = 0
+    for domain in itertools.product(chars, repeat=length):
+        if count >= max_generate:
+            break
+        domains.append(''.join(domain))
+        count += 1
+    
+    return domains
+
+def get_available_methods():
+    """Get list of available method names."""
+    return ['tld', 'dns', 'whois', 'ncapi', 'gandi', 'domainr']
+
+def create_methods_sequence(tlds_dict, methods_arg=None, exclude_methods_arg=None, domainr_api_key=DOMAINR_API_KEY):
+    """Create methods sequence based on arguments."""
+    available_methods = get_available_methods()
+    
+    if methods_arg:
+        # Only use specified methods
+        specified_methods = [m.strip().lower() for m in methods_arg.split(',')]
+        use_methods = [m for m in specified_methods if m in available_methods]
+    else:
+        # Use all methods by default
+        use_methods = available_methods.copy()
+    
+    if exclude_methods_arg:
+        # Remove excluded methods
+        excluded_methods = [m.strip().lower() for m in exclude_methods_arg.split(',')]
+        use_methods = [m for m in use_methods if m not in excluded_methods]
+    
+    # Create method instances
+    methods_sequence = []
+    batch_methods = []
+    
+    for method in use_methods:
+        if method == 'tld':
+            methods_sequence.append(TLDCheck(tlds_dict))
+        elif method == 'dns':
+            methods_sequence.append(DNSCheck())
+        elif method == 'whois':
+            methods_sequence.append(WHOISCheck())
+        elif method == 'ncapi':
+            batch_methods.append(('ncapi', NCAPICheck()))
+        elif method == 'gandi':
+            batch_methods.append(('gandi', GandiAPICheck()))
+        elif method == 'domainr':
+            batch_methods.append(('domainr', DomainrAPICheck(domainr_api_key)))
+    
+    return methods_sequence, batch_methods
+
+def should_show_domain(domain_status, show_status_arg, hide_status_arg):
+    """Determine if domain should be shown based on status filters."""
+    status = domain_status.get_plain_availability().lower()
+    
+    # Map status to standard names
+    status_map = {
+        'available': 'available',
+        'not available': 'unavailable',
+        'premium': 'premium',
+        'unknown': 'unknown'
+    }
+    
+    normalized_status = status_map.get(status, status)
+    
+    # Check show filter
+    if show_status_arg:
+        show_statuses = [s.strip().lower() for s in show_status_arg.split(',')]
+        if normalized_status not in show_statuses:
+            return False
+    
+    # Check hide filter
+    if hide_status_arg:
+        hide_statuses = [s.strip().lower() for s in hide_status_arg.split(',')]
+        if normalized_status in hide_statuses:
+            return False
+    
+    return True
+
 def main():
     global error_messages
-    domains_file = 'checkthis.txt'
-    tlds_file = 'tlds.json'
-    all_tlds_file = 'all-tlds.txt'
-    base_domain = None
-
-    # Check if the first argument is provided
-    if len(sys.argv) > 1:
-        base_domain = sys.argv[1]
-        # Read all-tlds.txt with lowercase conversion
-        if not os.path.isfile(all_tlds_file):
-            print(f"File '{all_tlds_file}' not found.")
-            sys.exit(1)
-        with open(all_tlds_file, 'r') as f:
-            tlds = [line.strip().lstrip('.').lower() for line in f if len(line.strip())<=MAX_TLD_LENGTH]
-        # Generate domains by appending base_domain with each TLD
-        domains = [f"{base_domain}.{tld}" for tld in tlds]
+    
+    # Parse arguments
+    args = parse_arguments()
+    
+    # Use arguments for all configuration (command line overrides environment variables)
+    domainr_api_key = args.domainr_api_key
+    max_tld_length = args.max_tld_length
+    threads = args.threads
+    max_generate = args.max_generate
+    output_file = args.output
+    charset = args.charset
+    tlds_json_file = 'tlds.json' # Hardcoded default
+    all_tlds_file = 'all-tlds.txt' # Hardcoded default
+    default_domains_file = 'checkthis.txt' # Hardcoded default
+    
+    # Determine input domains
+    domains = []
+    
+    if args.domain:
+        # Single domain
+        if '.' in args.domain:
+            domains = [args.domain]
+        else:
+            # Base domain, need TLDs
+            base_domain = args.domain
+            tlds = parse_tlds(args.tlds, max_tld_length)
+            domains = [f"{base_domain}.{tld}" for tld in tlds]
+    elif args.file:
+        # Load from file
+        domains = load_domains_from_file(args.file)
+    elif args.domains:
+        # Comma-separated domains
+        input_domains = [d.strip() for d in args.domains.split(',') if d.strip()]
+        domains = []
+        
+        # Check if any domain lacks a TLD (no dot)
+        base_domains = [d for d in input_domains if '.' not in d]
+        full_domains = [d for d in input_domains if '.' in d]
+        
+        # Add full domains as-is
+        domains.extend(full_domains)
+        
+        # For base domains, combine with TLDs if provided
+        if base_domains:
+            if args.tlds:
+                tlds = parse_tlds(args.tlds, max_tld_length)
+                for base_domain in base_domains:
+                    for tld in tlds:
+                        domains.append(f"{base_domain}.{tld}")
+            else:
+                # If no TLDs specified, treat as invalid
+                for base_domain in base_domains:
+                    domains.append(base_domain)  # This will fail validation
+    elif args.generate:
+        # Generate domains
+        base_domains = generate_domains(args.generate, charset, max_generate)
+        tlds = parse_tlds(args.tlds, max_tld_length)
+        
+        # Limit total combinations
+        domains = []
+        for base_domain in base_domains:
+            for tld in tlds:
+                if len(domains) >= max_generate:
+                    break
+                domains.append(f"{base_domain}.{tld}")
+            if len(domains) >= max_generate:
+                break
     else:
-        # Read from checkthis.txt
-        if not os.path.isfile(domains_file):
-            print(f"File '{domains_file}' not found.")
+        # Default: check default domains file
+        if not os.path.isfile(default_domains_file):
+            print(f"No input specified and default file '{default_domains_file}' not found.")
+            print("Use -h for help.")
             sys.exit(1)
-        with open(domains_file, 'r') as f:
-            domains = [line.strip() for line in f if line.strip()]
+        domains = load_domains_from_file(default_domains_file)
 
     if not domains:
         print("No domains to process.")
         sys.exit(0)
 
     # Load TLDs information
-    tlds_dict = load_tlds(tlds_file)
+    tlds_dict = load_tlds(tlds_json_file)
+
+    # Create methods sequence
+    methods_sequence, batch_methods = create_methods_sequence(
+        tlds_dict, args.methods, args.exclude_methods, domainr_api_key
+    )
 
     # Initialize PrettyTable
     table = PrettyTable()
@@ -714,79 +986,74 @@ def main():
     table.align["Availability"] = "l"
     table.align["Price (USD)"] = "l"
     table.align["Reason"] = "l"
-    table.hrules = 1  # Add horizontal lines between rows
-
-    # Initialize per-domain methods
-    methods_sequence = [
-        TLDCheck(tlds_dict),
-        DNSCheck(),
-        WHOISCheck(),
-        # Batch methods will be handled separately
-    ]
+    table.hrules = 1
 
     domain_statuses = []
-
     total_domains = len(domains)
 
     # Print header
-    print("2ME 2.0 - domain checker for all TLDs\n")
+    print(f"2ME {VERSION} - Advanced domain checker for all TLDs")
+    print(f"Processing {total_domains} domains with {len(methods_sequence)} per-domain methods and {len(batch_methods)} batch methods")
+    print(f"Using up to {threads} threads...\n")
 
     # Process per-domain methods with multithreading
-    print("Processing domains with up to 15 threads...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
-        # Use partial to fix the methods_sequence parameter
-        process_func = partial(process_domain, methods_sequence=methods_sequence)
-        # Submit all domains to the executor
-        futures = {executor.submit(process_func, domain): domain for domain in domains}
-        completed = 0
-        for future in concurrent.futures.as_completed(futures):
-            domain_status = future.result()
-            domain_statuses.append(domain_status)
-            completed += 1
-            if completed % 10 == 0 or completed == total_domains:
-                print(f"\rProcessed {completed}/{total_domains} domains", end='', flush=True)
+    if methods_sequence:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+            process_func = partial(process_domain, methods_sequence=methods_sequence)
+            futures = {executor.submit(process_func, domain): domain for domain in domains}
+            completed = 0
+            for future in concurrent.futures.as_completed(futures):
+                domain_status = future.result()
+                domain_statuses.append(domain_status)
+                completed += 1
+                if completed % 10 == 0 or completed == total_domains:
+                    print(f"\rProcessed {completed}/{total_domains} domains", end='', flush=True)
+        print(f"\n{color_text('✓', 'green')} Domains processed ({total_domains}/{total_domains})")
+    else:
+        # No per-domain methods, create DomainStatus objects
+        for domain in domains:
+            domain_statuses.append(DomainStatus(domain))
 
-    print(f"\n{color_text('✓', 'green')} Domains processed ({total_domains}/{total_domains})")
-
-    # Now process batch methods
-    # 1. NCAPICheck for both available and unknown domains
-    batch_ncapi_domains = [ds for ds in domain_statuses if ds.is_available == True or ds.is_available is None]
-    if batch_ncapi_domains:
-        ncapicheck = NCAPICheck()
-        ncapicheck.run(batch_ncapi_domains)
-
-    # 2. GandiAPICheck for domains still unknown
-    batch_gandi_domains = [ds for ds in domain_statuses if ds.is_available is None]
-    if batch_gandi_domains:
-        gandi_apicheck = GandiAPICheck()
-        gandi_apicheck.run(batch_gandi_domains)
-
-    # 3. DomainrAPICheck for domains still unknown after GandiAPICheck
-    batch_domainr_domains = [ds for ds in domain_statuses if ds.is_available is None]
-    if batch_domainr_domains:
-        domainr_apicheck = DomainrAPICheck()
-        domainr_apicheck.run(batch_domainr_domains)
+    # Process batch methods
+    for method_name, method_instance in batch_methods:
+        if method_name == 'ncapi':
+            batch_domains = [ds for ds in domain_statuses if ds.is_available == True or ds.is_available is None]
+        elif method_name == 'gandi':
+            batch_domains = [ds for ds in domain_statuses if ds.is_available is None]
+        elif method_name == 'domainr':
+            batch_domains = [ds for ds in domain_statuses if ds.is_available is None]
+        else:
+            batch_domains = domain_statuses
+        
+        if batch_domains:
+            method_instance.run(batch_domains)
 
     print()
-    # Sort the domain_statuses list based on the defined sort key
+    
+    # Sort the domain_statuses list
     sorted_domain_statuses = sorted(domain_statuses, key=get_sort_key)
 
-    # After API checks, add all sorted domain statuses to the table and write to output.txt
-    with open('output.txt', 'a') as outfile:
-        for ds in sorted_domain_statuses:
+    # Filter domains based on status
+    filtered_statuses = []
+    for ds in sorted_domain_statuses:
+        if should_show_domain(ds, args.show_status, args.hide_status):
+            filtered_statuses.append(ds)
+
+    # Add filtered domain statuses to table and write to output file
+    with open(output_file, 'w') as outfile:  # Changed to 'w' to overwrite
+        for ds in filtered_statuses:
             ds.print_result(table)
-            # Write to file without color codes
             result_line = ds.get_result_line()
             outfile.write(f"{result_line}\n")
 
-    # Print the table without extra newlines
     print(table)
+
+    print(f"\nShowing {len(filtered_statuses)} of {len(sorted_domain_statuses)} domains")
+    print(f"Results written to {output_file}")
 
     # Print any errors collected
     if error_messages:
-        print("\nErrors encountered during processing:")
-        for error in error_messages:
-            pass#print(error)
+        print(f"\n{len(error_messages)} errors encountered during processing (check domain_checker_errors.log)")
 
 if __name__ == "__main__":
     # Suppress all logging messages in console

@@ -1,3 +1,8 @@
 .env
 output.txt
 *.log
+.python-version
+main.py
+pyproject.toml
+.DS_Store
+uv.lock

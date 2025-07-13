@@ -2,8 +2,6 @@
 
 2ME is a powerful domain availability checker that uses multiple methods to verify domain availability and pricing. It provides detailed information about domain status, including availability, pricing, and any restrictions. 2ME is able to get availabilty status for *all* TLDs.
 
-![2ME Demo](https://imgur.com/TdcmX2P.gif)
-
 ## Setup
 
 1. Install the required dependencies:
@@ -11,50 +9,103 @@
    pip install -r requirements.txt
    ```
 
-2. (Optional) Create a `.env` file in the same directory as the script with the following content:
+2. (Optional) Create a `.env` file in the same directory as the script with config:
 
    - `DOMAINR_API_KEY`: Your Domainr API key from RapidAPI
-   - `MAX_TLD_LENGTH`: Maximum TLD length to check
 
    You can get a Domainr API key by signing up at [RapidAPI](https://rapidapi.com/domainr/api/domainr).
+
+   #### Or via parameters
+
+- `--domainr-api-key` - Domainr API key
 
     *without this free API key, depending on the search, about 90% can still be checked.
 
 ## Usage
 
-### Check domains from a file:
+### Basic Usage
+
+```bash
+# Check single domain
+python 2ME.py example.com
+
+# Check domains from file
+python 2ME.py -f domains.txt
+
+# Check comma-separated domains
+python 2ME.py -d "example.com,test.org,mydomain.net"
+
+# Adjust thread count
+python 2ME.py -f domains.txt --threads 50
 ```
-python 2ME.py
+
+### Domain Generation
+
+```bash
+# Generate 3-character domains with all TLDs
+python 2ME.py --generate 3 --charset a-z
+
+# Generate 4-character alphanumeric domains with specific TLDs
+python 2ME.py --generate 4 --charset a-z0-9 --tlds ".com,.net,.org"
+
+# Generate numeric domains
+python 2ME.py --generate 5 --charset 0-9 --max-generate 100
 ```
-This will read domains from `checkthis.txt` and check their availability.
 
-### Check a base domain with all TLDs:
+### TLD Configuration
+
+```bash
+# Use specific TLDs (comma-separated)
+python 2ME.py example --tlds ".com,.net,.org,.io"
+
+# Use TLDs from file
+python 2ME.py example --tlds-file my-tlds.txt
+
+# Use all TLDs (default)
+python 2ME.py example --tlds "*"
 ```
-python 2ME.py example
+
+### Method Selection
+
+```bash
+# Use only specific methods
+python 2ME.py example.com --methods tld,dns,whois
+
+# Exclude specific methods
+python 2ME.py example.com --exclude-methods whois,ncapi
+
+# Available methods: tld, dns, whois, ncapi, gandi, domainr
 ```
-This will check the availability of `example.tld` for all TLDs listed in `all-tlds.txt` with length <= MAX_TLD_LENGTH.
 
-## Output
+### Status Filtering
 
-Results are displayed in a table and also saved to `output.txt`.
+```bash
+# Show only available domains
+python 2ME.py -f domains.txt --show-status available
 
-## Features
+# Hide unavailable and premium domains
+python 2ME.py -f domains.txt --hide-status unavailable,premium
 
-- Multiple checking methods (DNS, WHOIS, API)
-- Support for premium domain detection
-- Price information
-- Color-coded output for better readability
-- Batch processing capabilities
+# Show only premium domains
+python 2ME.py -f domains.txt --show-status premium
+```
 
-## Methods
+### Output Options
 
-The tool uses multiple methods (in this order) to check domain availability fast and free:
-- TLD validation
-- DNS record checking
-- WHOIS lookup
-- Namecheap API
-- Gandi API
-- Domainr API
+```bash
+# Specify output file
+python 2ME.py -f domains.txt -o results.txt
+```
+
+## Verification Methods
+
+### Per-Domain Methods
+1. **TLD Check** (`tld`) - Validates TLD format and retrieves pricing info
+2. **DNS Check** (`dns`) - Checks for DNS records (A, MX, NS)
+3. **WHOIS Check** (`whois`) - Queries WHOIS database
+4. **NCAPI Check** (`ncapi`) - Namecheap API batch checking
+5. **Gandi API Check** (`gandi`) - Gandi registrar API
+6. **Domainr API Check** (`domainr`) - Domainr API (requires API key)
 
 All methods are free to use, and only Domainr requires an actual API key. A free Domainr key gives 10K queries/month. Since all other methods are free and unlimited, 2ME will try to get all data with the other methods first. Domainr is only there to validate the last unique TLDs (if requested).
 
