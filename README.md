@@ -1,117 +1,94 @@
 # 2ME
 
-2ME is a powerful domain availability checker that uses multiple methods to verify domain availability and pricing. It provides detailed information about domain status, including availability, pricing, and any restrictions. 2ME is able to get availabilty status for *all* TLDs.
+Domain availability checker for every TLD. It combines DNS, RDAP, WHOIS and registrar APIs and reports each domain as available, premium, in quarantine, not available or unknown, with a price where one is known.
 
-## Setup
+## Install
 
-1. Install the required dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-
-2. (Optional) Create a `.env` file in the same directory as the script with config:
-
-   - `DOMAINR_API_KEY`: Your Domainr API key from RapidAPI
-
-   You can get a Domainr API key by signing up at [RapidAPI](https://rapidapi.com/domainr/api/domainr).
-
-   #### Or via parameters
-
-- `--domainr-api-key` - Domainr API key
-
-    *without this free API key, depending on the search, about 90% can still be checked.
+```bash
+pip install -r requirements.txt
+```
 
 ## Usage
 
-### Basic Usage
-
 ```bash
-# Check single domain
+# One domain
 python 2ME.py example.com
 
-# Check domains from file
+# One name on every TLD
+python 2ME.py example
+
+# One name on selected TLDs
+python 2ME.py example --tlds ".com,.net,.io"
+
+# Several domains, or a file with one domain per line
+python 2ME.py -d "example.com,example.org"
 python 2ME.py -f domains.txt
 
-# Check comma-separated domains
-python 2ME.py -d "example.com,test.org,mydomain.net"
+# Every 3-letter name on .com
+python 2ME.py --generate 3 --tlds ".com"
 
-# Adjust thread count
-python 2ME.py -f domains.txt --threads 50
+# Only show what can be registered
+python 2ME.py example --show-status available,premium
 ```
 
-### Domain Generation
+Results are printed as a table and saved to `output.txt`. `output.json` holds every checked domain, including those hidden by a status filter, and keeps the domains of earlier runs.
 
-```bash
-# Generate 3-character domains with all TLDs
-python 2ME.py --generate 3 --charset a-z
+## Options
 
-# Generate 4-character alphanumeric domains with specific TLDs
-python 2ME.py --generate 4 --charset a-z0-9 --tlds ".com,.net,.org"
+| Option | Description |
+|---|---|
+| `-f`, `--file` | File with domains or names, one per line |
+| `-d`, `--domains` | Comma-separated domains or names |
+| `--generate N` | Generate every name of N characters (needs `--tlds`) |
+| `--charset` | Characters for `--generate`: `a-z` (default), `a-z0-9` or `0-9` |
+| `--max-generate` | Maximum number of generated domains (default 1000000) |
+| `--tlds` | Comma-separated TLDs, a file with one TLD per line, or `*` for all (default) |
+| `--max-tld-length` | Skip longer TLDs |
+| `--methods` | Only use these methods |
+| `--exclude-methods` | Skip these methods |
+| `--show-status` | Only show these statuses |
+| `--hide-status` | Hide these statuses |
+| `-o`, `--output` | Output file (default `output.txt`); the JSON file is written next to it |
+| `--threads` | Number of threads (default 10) |
+| `--extract-whois-info` | Add registration and expiration dates of registered domains to the JSON file |
+| `--skip-known-whois` | With `--extract-whois-info`: skip domains whose dates are already in the JSON file |
+| `--debug` | Write debug details to `2me-debug.log` |
 
-# Generate numeric domains
-python 2ME.py --generate 5 --charset 0-9 --max-generate 100
-```
+Statuses: `available`, `premium`, `quarantine`, `unavailable`, `unknown`.
 
-### TLD Configuration
+## Methods
 
-```bash
-# Use specific TLDs (comma-separated)
-python 2ME.py example --tlds ".com,.net,.org,.io"
+Methods run in this order. Each one only checks the domains that are still unknown.
 
-# Use TLDs from file
-python 2ME.py example --tlds-file my-tlds.txt
+| Name | Checks |
+|---|---|
+| `tld` | Valid name and existing TLD; adds price and restrictions |
+| `dns` | A, MX and NS records |
+| `rdap` | Registration record at the registry, with dates |
+| `pywhois` | WHOIS |
+| `vercel` | Vercel registrar API, with prices |
+| `ncapi` | Namecheap API |
+| `gandi` | Gandi API, with prices |
+| `whoisvu` | WHOIS through whois.vu |
+| `fastly` | Fastly Domain Research API (optional, needs a token) |
 
-# Use all TLDs (default)
-python 2ME.py example --tlds "*"
-```
+`whois` selects both `pywhois` and `whoisvu`.
 
-### Method Selection
+Only `fastly` needs an account. It checks the domains the other methods left unknown, one per request, and is billed beyond Fastly's free monthly allowance. To use it, set `FASTLY_API_TOKEN` in the environment or in a `.env` file next to `2ME.py` (see `.env.example`). Without a token it is skipped.
 
-```bash
-# Use only specific methods
-python 2ME.py example.com --methods tld,dns,whois
+A domain without a registration record can still be premium or reserved, so the registrar APIs decide. If none of them can, it is reported as available with the reason "No registration record".
 
-# Exclude specific methods
-python 2ME.py example.com --exclude-methods whois,ncapi
+## Data files
 
-# Available methods: tld, dns, whois, ncapi, gandi, domainr
-```
+In `data/`:
 
-### Status Filtering
+| File | Contents |
+|---|---|
+| `all-tlds.txt` | TLDs used for `*` |
+| `tlds.json` | Price and restrictions per TLD |
+| `rdap-servers.json` | RDAP server per TLD |
 
-```bash
-# Show only available domains
-python 2ME.py -f domains.txt --show-status available
+## Extending
 
-# Hide unavailable and premium domains
-python 2ME.py -f domains.txt --hide-status unavailable,premium
-
-# Show only premium domains
-python 2ME.py -f domains.txt --show-status premium
-```
-
-### Output Options
-
-```bash
-# Specify output file
-python 2ME.py -f domains.txt -o results.txt
-```
-
-## Verification Methods
-
-### Per-Domain Methods
-1. **TLD Check** (`tld`) - Validates TLD format and retrieves pricing info
-2. **DNS Check** (`dns`) - Checks for DNS records (A, MX, NS)
-3. **WHOIS Check** (`whois`) - Queries WHOIS database
-4. **NCAPI Check** (`ncapi`) - Namecheap API batch checking
-5. **Gandi API Check** (`gandi`) - Gandi registrar API
-6. **Domainr API Check** (`domainr`) - Domainr API (requires API key)
-
-All methods are free to use, and only Domainr requires an actual API key. A free Domainr key gives 10K queries/month. Since all other methods are free and unlimited, 2ME will try to get all data with the other methods first. Domainr is only there to validate the last unique TLDs (if requested).
-
-Example when checking a single domain for *all* TLDS;
-- 1446 total queries
-- 1011 validated by TLD validation/DNS records/WHOIS lookup.
-- 262 validated by NCAPI
-- 148 validated by Gandi API
-- only 23 validated by Domainr (1.59%)
+- **Method:** add `methods/<name>_method.py` with a class that inherits from `BaseMethod` (one domain per call) or `BaseBatchMethod` (a list per call). Set `priority` and `method_name` and implement `run()`.
+- **TLD rule:** add `tld_rules/<tld>.py` with a function decorated with `@tld_rule(method=...)`. See `tld_rules/nl.py`.

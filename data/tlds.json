@@ -812,10 +812,6 @@
         "whois_server": "whois.nic.beer"
     },
     {
-        "name": "bentley",
-        "can_register": false
-    },
-    {
         "name": "berlin",
         "can_register": true,
         "average_price": "63.57",
@@ -2644,10 +2640,6 @@
         "can_register": false
     },
     {
-        "name": "dunlop",
-        "can_register": false
-    },
-    {
         "name": "dupont",
         "can_register": false
     },
@@ -3750,10 +3742,6 @@
         "whois_server": "whois.nic.golf"
     },
     {
-        "name": "goo",
-        "can_register": false
-    },
-    {
         "name": "goodyear",
         "can_register": false
     },
@@ -4034,10 +4022,6 @@
         "restrictions": "No known restrictions",
         "registry_site": "https://nic.help",
         "whois_server": "whois.nic.help"
-    },
-    {
-        "name": "helsinki",
-        "can_register": false
     },
     {
         "name": "here",
@@ -4736,10 +4720,6 @@
         "whois_server": "whois.uniregistry.net"
     },
     {
-        "name": "juniper",
-        "can_register": false
-    },
-    {
         "name": "kaufen",
         "can_register": true,
         "average_price": "30.10",
@@ -4765,10 +4745,6 @@
     },
     {
         "name": "kerryhotels",
-        "can_register": false
-    },
-    {
-        "name": "kerrylogistics",
         "can_register": false
     },
     {
@@ -4998,10 +4974,6 @@
         "can_register": false
     },
     {
-        "name": "lancaster",
-        "can_register": false
-    },
-    {
         "name": "land",
         "can_register": true,
         "average_price": "28.73",
@@ -5214,10 +5186,6 @@
         "restrictions": "No known restrictions",
         "registry_site": "http://uniregistry.link",
         "whois_server": "whois.uniregistry.net"
-    },
-    {
-        "name": "lipsy",
-        "can_register": false
     },
     {
         "name": "live",
@@ -5672,6 +5640,10 @@
         "restrictions": "No known restrictions",
         "registry_site": "http://www.nic.menu",
         "whois_server": "whois.nic.menu"
+    },
+    {
+        "name": "merck",
+        "can_register": false
     },
     {
         "name": "merckmsd",
@@ -6962,10 +6934,6 @@
         "whois_server": "whois.afilias-srs.net"
     },
     {
-        "name": "pramerica",
-        "can_register": false
-    },
-    {
         "name": "praxi",
         "can_register": false
     },
@@ -7234,10 +7202,6 @@
         "restrictions": "No known restrictions",
         "registry_site": "https://www.identity.digital/",
         "whois_server": "whois.nic.red"
-    },
-    {
-        "name": "redstone",
-        "can_register": false
     },
     {
         "name": "redumbrella",
@@ -9458,6 +9422,11 @@
         "can_register": false
     },
     {
+        "name": "web",
+        "can_register": false,
+        "restrictions": "Not yet open for registration"
+    },
+    {
         "name": "webcam",
         "can_register": true,
         "average_price": "23.71",
@@ -9577,10 +9546,6 @@
     },
     {
         "name": "wme",
-        "can_register": false
-    },
-    {
-        "name": "wolterskluwer",
         "can_register": false
     },
     {

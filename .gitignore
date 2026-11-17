@@ -1,8 +1,8 @@
 .env
-output.txt
-*.log
+.venv/
+__pycache__/
 .python-version
-main.py
-pyproject.toml
 .DS_Store
-uv.lock
+output.txt
+output.json
+*.log
